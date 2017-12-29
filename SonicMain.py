@@ -14,60 +14,53 @@ import subprocess, time
 import KeyboardEvents as ke
 
 def saveState(slot):
-    # Slot should be a number 0 - 9
+    """Slot should be a number 0 - 9"""
     ke.KeyPress(str(slot))
     ke.KeyPress("o")
+    return
 
 def loadState(slot):
     ke.KeyPress(str(slot))
     ke.KeyPress("p")
+    return
 
-def startState(slot):
-    #run ROMFILE
+def startState(slot, reset=False):
+    """Run the ROMFILE"""
+    if reset == False:
+        wdir = "/Users/dascienz/Desktop/dgen-sdl-1.33/"
+        rom = "SonictheHedgehog.bin"
+        subprocess.Popen(["./dgen", "-s", str(slot), rom], cwd=wdir)
+    else:
+        wdir = "/Users/dascienz/Desktop/dgen-sdl-1.33/"
+        rom = "SonictheHedgehog.bin"
+        subprocess.Popen(["./dgen", rom], cwd=wdir)
     
-    wdir = "/Users/dascienz/Desktop/dgen-sdl-1.33/"
-    rom = "SonictheHedgehog.bin"
-    subprocess.Popen(["./dgen", "-s", str(slot), rom], cwd=wdir)
+        #hit start at the title screen
+        time.sleep(9.25)
+        ke.KeyDown('.') 
+        time.sleep(0.25)
+        ke.KeyUp('.')
+        time.sleep(0.25)
+        saveState(0)
+    return
     
-    """
-    wdir = "/Users/dascienz/Desktop/dgen-sdl-1.33/"
-    rom = "SonictheHedgehog.bin"
-    subprocess.Popen(["./dgen", rom], cwd=wdir)
-    
-    #hit start at the title screen
-    time.sleep(9.25)
-    ke.KeyDown('.') 
-    time.sleep(0.25)
-    ke.KeyUp('.')
-    time.sleep(0.25)
-    saveState(0)
-    """    
-
 def closeGame():
     try:
         ke.KeyPress('esc')
         raise KeyboardInterrupt
     except KeyboardInterrupt:
         pass
-
-"""
-from PIL import Image
-def playSonic():
-    NN.runQ()
-    while True:
-        img = Image.fromarray(observationGrab())
-        working_dir = '/Users/dascienz/Desktop/sonicNN/frames/'
-        img.save(working_dir + 'frame_' + str(int(time.time())) + '.png', 'PNG')
-"""
-
-#run game  
+    return
+  
 def trainingMain():
     #runs the training program
     NN.trainNetwork()
+    return
     
 def testingMain():
     #runs the testing program
     NN.testNetwork()
+    return
 
 if __name__ == '__main__':
     prompt = input("Do you want to 'train' or 'test'?\n>>")
