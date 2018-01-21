@@ -206,7 +206,7 @@ def trainNetwork():
     
     #DENSE LAYER 2
     readout = tf.layers.dense(inputs=dropout, units=ACTIONS)
-    predict = tf.argmax(inputs=readout,axis=1) #Predicted action from max Q-value
+    predict = tf.argmax(readout,axis=1) #Predicted action from max Q-value
 
     a = tf.placeholder(dtype=tf.int32, shape=[BATCH]) # actions
     a_one_hot = tf.one_hot(a, 4, dtype=tf.float32) #one-hot-encoded actions
