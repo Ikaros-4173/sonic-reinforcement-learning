@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 """
@@ -80,7 +81,9 @@ def observationGrab():
 def preprocess(observation):
     """Pre-process image array to (80*80) grayscale image array."""
     observation = cv2.resize(observation, (80, 80))
-    observation = cv2.cvtColor(cv2.resize(observation, (80, 80)), cv2.COLOR_RGB2GRAY)
+    observation = cv2.cvtColor(observation, cv2.COLOR_RGB2GRAY)
+    observation = (observation/255.0)-0.5
+    #_, observation = cv2.threshold(observation, 0.40, 1.0, cv2.THRESH_BINARY)
     return np.reshape(observation,(80, 80, 1))
 
 def gameOverCheck(observation, dy):
@@ -153,7 +156,8 @@ def testFrames():
     initiateGame()
     
     while True:
-        array = captureScore(dy=2)
+        #array = captureScore(dy)
+        array = observationGrab()
         img = Image.fromarray(array)
         print(sr.scoreBoard(array))
         working_dir = '/Users/dascienz/Desktop/sonicNN/Test_Frames/'
@@ -173,41 +177,43 @@ def trainNetwork():
     GAMMA = 0.95
     EPSILON = 1.0
     BATCH = 32
-    MEMORY = 25000
+    MEMORY = 10000
     STDDEV = 0.1
     LEARNING_RATE = 1e-6
 
-    #Build the convolutional neural network.
+    #INPUT LAYER
     x = tf.placeholder(dtype=tf.float32, shape = [None, 80, 80, 1]) # input observation
-
+    
+    #CONVOLUTIONAL LAYER 1
     W_conv1 = tf.Variable(tf.truncated_normal(shape=[8,8,1,32], stddev=STDDEV))
     b_conv1 = tf.Variable(tf.constant(0.01, shape=[32]))
     h_conv1 = tf.nn.relu(tf.nn.conv2d(x, W_conv1,strides=[1,4,4,1],padding='SAME')+b_conv1)
-    #h_pool1 = tf.nn.max_pool(h_conv1, ksize=[1,2,2,1],strides=[1,2,2,1],padding='SAME')
     
+    #CONVOLUTIONAL LAYER 2
     W_conv2 = tf.Variable(tf.truncated_normal(shape=[4,4,32,64], stddev=STDDEV))
     b_conv2 = tf.Variable(tf.constant(0.01, shape=[64]))
     h_conv2 = tf.nn.relu(tf.nn.conv2d(h_conv1,W_conv2,strides=[1,2,2,1],padding='SAME')+b_conv2)
     
+    #CONVOLUTIONAL LAYER 3
     W_conv3 = tf.Variable(tf.truncated_normal(shape=[3,3,64,64], stddev=STDDEV))
     b_conv3 = tf.Variable(tf.constant(0.01,shape=[64]))
     h_conv3 = tf.nn.relu(tf.nn.conv2d(h_conv2,W_conv3,strides=[1,1,1,1],padding='SAME')+b_conv3)
-    h_conv3_flat = tf.reshape(h_conv3,[-1,1600])
     
-    W_fc1 = tf.Variable(tf.truncated_normal(shape=[1600,512], stddev=STDDEV))
-    b_fc1 = tf.Variable(tf.constant(0.01, shape=[512]))
-    h_fc1 = tf.nn.relu(tf.matmul(h_conv3_flat, W_fc1)+b_fc1)
+    #DENSE LAYER 1
+    h_conv3_flat = tf.contrib.layers.flatten(h_conv3) # flattened convolutional layer 3
+    h_fc1 = tf.layers.dense(inputs=h_conv3_flat, units=2048) # fully connected dense layer
+    dropout = tf.layers.dropout(inputs=h_fc1, rate=0.40)
     
-    W_fc2 = tf.Variable(tf.truncated_normal(shape=[512,ACTIONS], stddev=STDDEV))
-    b_fc2 = tf.Variable(tf.constant(0.01, shape=[ACTIONS]))
-    
-    prediction = (tf.matmul(h_fc1, W_fc2) + b_fc2)
+    #DENSE LAYER 2
+    readout = tf.layers.dense(inputs=dropout, units=ACTIONS)
+    predict = tf.argmax(inputs=readout,axis=1) #Predicted action from max Q-value
 
-    a = tf.placeholder(dtype=tf.float32, shape=[BATCH, ACTIONS]) # action index
-    y = tf.placeholder(dtype=tf.float32, shape=[BATCH]) # targets - predicted actions
+    a = tf.placeholder(dtype=tf.int32, shape=[BATCH]) # actions
+    a_one_hot = tf.one_hot(a, 4, dtype=tf.float32) #one-hot-encoded actions
+    y = tf.placeholder(dtype=tf.float32, shape=[BATCH]) # target rewards
     
-    out_action = tf.reduce_sum(tf.multiply(prediction[0], a), axis = 1) # readout_action
-    loss = tf.reduce_mean(tf.square(y - out_action))
+    Qout = tf.reduce_sum(tf.multiply(readout,a_one_hot),axis=1)
+    loss = tf.reduce_mean(tf.square(y - Qout))
     train_step = tf.train.AdamOptimizer(LEARNING_RATE).minimize(loss)
     
     with tf.Session() as sess:
@@ -221,38 +227,33 @@ def trainNetwork():
         scores, losses = [], []
         observations = deque() #replay memory
         initiateGame() #initialize game state
-        print("\n*------ GAME START ------*")
+        print("\n*----- GAME START -----*")
         
         for episode in range(EPISODES):
             
             if episode % 100 == 0:
                 saver.save(sess, "SavedNetworks/model_%s.ckpt" % (episode))
- 
-            count, terminal = 0, 0
+                
+            count, terminal, done = 0, 0, False
             
-            done = False
             sm.loadState(0)
             print("Episode: %s" % (episode + 1) + " Random: %s" % (100.0*EPSILON))
             time.sleep(0.25)
             
-            while done is False:
-    
-                #We are in state S
-                state, score = getState(dy)
-                while score < 0:
-                    state, score = getState(dy) # initial state, initial score
-                    count = 0
-                
+            #We are in initial state S
+            state, score = getState(dy)
+            while score < 0:
+                state, score = getState(dy) # initial state, initial score
+            
+            while done is False: 
                 #Run our Q function on S to get Q values for all possible actions.
-                action = np.zeros((ACTIONS))
                 if (np.random.random() <= EPSILON): #choose random action
-                    i = np.random.randint(0,4)
-                    action[i] = 1
+                    action = np.zeros((ACTIONS))
+                    action[np.random.randint(0,4)] = 1
+                    action = np.argmax(action)
                 else: #choose best action from Q(s,a) values
-                    qvals = prediction.eval(feed_dict={x: [state]})[0] # Qout
-                    action[np.argmax(qvals)] = 1    
-                action_argmax = np.argmax(action)
-                buttonPress(action_argmax) #Take action.
+                    action, Qvals = sess.run([predict,readout],feed_dict={x: [state]}) # Q-values
+                buttonPress(action) #Take action.
                 time.sleep(0.05)
                 
                 #Observe new state and score.
@@ -262,7 +263,7 @@ def trainNetwork():
                     count = 0
 
                 if(gameOverCheck(observationGrab(), dy) <= 1065):
-                    reward, count, terminal = -10, 0, 1
+                    reward, count, terminal = -100, 0, 1
                     observations.append((state, action, reward, new_state, terminal))
                     done = True
                 
@@ -271,42 +272,43 @@ def trainNetwork():
                 if(diff == 0):
                     count += 1
                     if(count >= 150):
-                        reward, count, terminal = -1, 0, 1
-                        observations.append((state, action, reward, new_state, terminal))
                         done = True
                 elif(diff > 0):
                     reward, count, terminal = 10, 0, 0
                     observations.append((state, action, reward, new_state, terminal))
                 elif(diff < 0):
-                    reward, count, terminal = -1, 0, 1
+                    reward, count, terminal = -100, 0, 1
                     observations.append((state, action, reward, new_state, terminal))
+                    done = True
+                
+                state, score = new_state, new_score
                        
             scores.append(score)
             
             #Pop first transition from replay memory.
-            if len(observations) >= MEMORY:
+            if len(observations) > MEMORY:
                 observations.popleft()
             
             #Replay memory loop.
             if len(observations) >= BATCH:
                 batch = random.sample(observations, BATCH)
                 
-                state_batch = [i[0] for i in batch]
-                action_batch = [i[1] for i in batch]
-                reward_batch = [i[2] for i in batch]
-                new_state_batch = [i[3] for i in batch]
-                terminal_batch = [i[4] for i in batch]
+                state_batch = [i[0] for i in batch] #states
+                action_batch = [i[1] for i in batch] #actions
+                reward_batch = [i[2] for i in batch] #rewards
+                new_state_batch = [i[3] for i in batch] #new states
+                terminal_batch = [i[4] for i in batch] #terminal 0,1
                 
-                y_batch = []
-                predictions = sess.run(prediction, feed_dict={x: new_state_batch})
+                y_batch = [] #target Q-values
+                predictions = sess.run(readout, feed_dict={x: new_state_batch}) #predictions
 
                 for idx in range(len(batch)):
                     if terminal_batch[idx] == 1: #is terminal state
                         y_batch.append(reward_batch[idx]) #reward only
                     else: #is not terminal state
-                        y_batch.append(reward_batch[idx] + GAMMA*np.max(predictions[idx])) # discounted future reward
-                train_step.run(feed_dict={x: state_batch, a: action_batch, y: y_batch})
-                l = sess.run(loss, feed_dict={x: state_batch, a: action_batch, y: y_batch})
+                        y_batch.append(reward_batch[idx] + GAMMA*np.max(predictions[idx])) #discounted future reward
+                train_step.run(feed_dict={x: state_batch, a: action_batch, y: y_batch}) #update model
+                l = sess.run(loss, feed_dict={x: state_batch, a: action_batch, y: y_batch}) #record loss
                 print("Loss: ", l)
                 losses.append(l)
             #End of replay memory loop.
@@ -318,14 +320,25 @@ def trainNetwork():
         #End of episodes.
         sm.closeGame()
         
+        now = time.time()
+        
+        #Write training parameters to file.
+        with open("Training/parameters_%s.txt" % (now), "w") as outfile:
+            outfile.write("episodes\t%s" % EPISODES)
+            outfile.write("gamma\t%s" % GAMMA)
+            outfile.write("batch\t%s" % BATCH)
+            outfile.write("memory\t%s" % MEMORY)
+            outfile.write("stddev\t%s" % STDDEV)
+            outfile.write("learning_rate\t%s" % LEARNING_RATE)
+        
         #Write scores to file.
-        with open("Training/scores_%s.csv" % (time.time()), "w") as outfile:
+        with open("Training/scores_%s.csv" % (now), "w") as outfile:
             writer = csv.writer(outfile)
             for score in scores:
                 writer.writerow([score])
         
         #Write training loss to file.
-        with open("Training/losses_%s.csv" % (time.time()), "w") as outfile:
+        with open("Training/losses_%s.csv" % (now), "w") as outfile:
             writer = csv.writer(outfile)
             for loss in losses:
                 writer.writerow([loss])
